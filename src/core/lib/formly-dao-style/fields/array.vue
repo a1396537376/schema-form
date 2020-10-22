@@ -7,8 +7,8 @@
       :model="item"
       :field="field.fields"
       @remove="removeItem">
-    ></array-item>
-
+    >
+    </array-item>
     <button
       class="dao-btn blue mini has-icon"
       @click="addItem">
@@ -23,6 +23,7 @@
 <script>
 import ArrayItem from './arrayItem.vue';
 import FieldItem from '../components/field-item';
+import { parseDefaultObjectValue } from '@/core/lib/formly-dao-style-parser/parse.js';
 
 export default {
   components: {
@@ -36,11 +37,15 @@ export default {
     items() {
       return this.model[this.field.key];
     },
+    monitor() {
+      return this.field;
+    },
   },
 
   methods: {
     addItem() {
-      this.items.push({});
+      const data = parseDefaultObjectValue(this.monitor, this.monitor.fields, null, true);
+      this.items.push({ ...data });
     },
 
     removeItem(index) {

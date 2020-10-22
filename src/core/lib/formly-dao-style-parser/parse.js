@@ -11,6 +11,7 @@ export const SCHEMA_TYPES = Object.freeze({
   NUMBER: 'number',
   OBJECT: 'object',
   STRING: 'string',
+  ANY: undefined,
 });
 
 export const INPUT_TYPES = Object.freeze({
@@ -24,7 +25,7 @@ export const INPUT_TYPES = Object.freeze({
   TEXT: 'text',
   TEXTAREA: 'textarea',
   URL: 'url',
-  PASSWORD: 'password'
+  PASSWORD: 'password',
 });
 
 export const NUMBER_TYPES = Object.freeze([SCHEMA_TYPES.INTEGER, SCHEMA_TYPES.NUMBER]);
@@ -87,7 +88,7 @@ export function setCommonFields(schema, field, model = null) {
   }
 
   field.order = schema.order;
-  field.schemaType = schema.type;
+  field.schemaType = schema.type || SCHEMA_TYPES.OBJECT;
   field.label = schema.title || '';
   field.description = schema.description || '';
   field.attrs.id = field.attrs.id || genId(field.attrs.name);
@@ -119,6 +120,10 @@ export function parseEventValue({ target, field, data }) {
       return target.checked === true;
 
     case SCHEMA_TYPES.STRING:
+      // array 子项是非Object,暂定解决方案
+      if (JSON.stringify(data) == "{}") {
+        return '';
+      }
       return data || '';
 
     case SCHEMA_TYPES.NUMBER:
@@ -138,7 +143,7 @@ export function parseEventValue({ target, field, data }) {
   return data;
 }
 
-export function parseDefaultObjectValue(schema, fields, value) {
+export function parseDefaultObjectValue(schema, fields, value, assembly) {
   const data = schema.type === SCHEMA_TYPES.ARRAY ? [] : {};
 
   if (value) {
@@ -166,7 +171,11 @@ export function parseDefaultObjectValue(schema, fields, value) {
 
       case SCHEMA_TYPES.OBJECT:
         const objectData = parseEventValue(eventInput);
-        data[name] = parseDefaultObjectValue(schema.properties[name], field.fields, objectData);
+        if (assembly) {
+          data[name] = parseDefaultObjectValue(field.fields, field.fields, objectData, true);
+        } else {
+          data[name] = parseDefaultObjectValue(schema.properties[name], field.fields, objectData);
+        }
         break;
 
       default:
@@ -192,8 +201,9 @@ export function parseDefaultObjectValue(schema, fields, value) {
 
 export function loadFields(schema, fields = [], name = null, model = null) {
   switch (schema.type) {
+   
+    case SCHEMA_TYPES.ANY:
     case SCHEMA_TYPES.OBJECT:
-      // setting required
       if (schema.required instanceof Array) {
         schema.required.forEach(field => {
           if (schema.properties[field]) {
@@ -202,9 +212,9 @@ export function loadFields(schema, fields = [], name = null, model = null) {
         });
       }
 
-      const allProperties = Object.keys(schema.properties);
+      const allProperties = Object.keys(schema.properties || {});
       const properties = schema.order instanceof Array ? schema.order : allProperties;
-
+      // order 兼容
       if (properties.length < allProperties.length) {
         allProperties.forEach(prop => {
           if (!properties.includes(prop)) {
@@ -216,19 +226,29 @@ export function loadFields(schema, fields = [], name = null, model = null) {
       if (model === null) {
         model = {};
       }
-
-      properties.forEach(key => {
-        if (schema.properties[key].type === SCHEMA_TYPES.OBJECT && !name) {
-          const field = parseObject(schema.properties[key], key, model);
-          field.fields = [];
-          loadFields(schema.properties[key], field.fields, key, model[key] || null);
-          fields.push(field);
-        } else {
-          loadFields(schema.properties[key], fields, key, model[key] || null);
-        }
-      });
+      // 兼容无子项且type = object
+      if (properties.length === 0) {
+        // schema.type = 'string';
+        // if (name === null) {
+        //   break;
+        // }
+        // model = null 解决输入框value = [Object]问题
+        // fields.push(parseString(schema, name, null));
+        break;
+      } else {
+        properties.forEach(key => {
+          const type = schema.properties[key].type;
+          if (type == SCHEMA_TYPES.OBJECT || type == SCHEMA_TYPES.ANY) {
+            const field = parseObject(schema.properties[key], key, model);
+            field.fields = [];
+            loadFields(schema.properties[key], field.fields, key, model[key] || null);
+            fields.push(field);
+          } else {
+            loadFields(schema.properties[key], fields, key, model[key] || null);
+          }
+        });
+      }
       break;
-
     case SCHEMA_TYPES.BOOLEAN:
       fields.push(parseBoolean(schema, name, model));
       break;
@@ -449,6 +469,8 @@ export function parseArray(schema, name = null, model = null) {
   if (!field.attrs.type) {
     field.isArrayField = true;
     field.attrs.type = schema.items ? schema.items.type : INPUT_TYPES.TEXT;
+    //field.attrs.type = schema.items ? schema.items.type !== 'object' ? 'array' : schema.items.type : INPUT_TYPES.TEXT;
+    // field.attrs.type = 'array';
     field.fields = [];
     loadFields(schema.items, field.fields, name, {});
   } else if (field.attrs.type === INPUT_TYPES.SELECT) {
@@ -479,7 +501,7 @@ export function parseObject(schema, name = null, model = null) {
     field.attrs.name = name;
   }
 
-  field.attrs.type = schema.type;
+  field.attrs.type = schema.type || SCHEMA_TYPES.OBJECT;
 
   setCommonFields(schema, field, model);
 
